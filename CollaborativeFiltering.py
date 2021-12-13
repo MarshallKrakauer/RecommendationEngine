@@ -13,6 +13,8 @@ import pandas as pd
 import tensorflow as tf
 from matplotlib import pyplot as plt
 
+from CreateGameRatingsData import get_ratings_data
+
 # Constants
 DOT = 'dot'
 COSINE = 'cosine'
@@ -24,7 +26,7 @@ def mask(df, key, function):
 
 
 def flatten_cols(df):
-    df.columns = [' '.join(col).strip() for col in df.columns.values]
+    df.columns = [' '.join(col).strip() for col in df.columns]
     return df
 
 
@@ -40,10 +42,6 @@ def split_dataframe(df, holdout_fraction=0.1):
     test = df.sample(frac=holdout_fraction, replace=False)
     train = df[~df.index.isin(test.index)]
     return train, test
-
-
-def return_negative_one():
-    return -1
 
 
 def build_rating_sparse_tensor(ratings_df):
@@ -80,6 +78,7 @@ def sparse_mean_square_error(sparse_ratings, user_embeddings, movie_embeddings):
     return loss
 
 
+# noinspection PyUnresolvedReferences
 def build_model(ratings, embedding_dim=3, init_stddev=1.):
     """
     Args:
@@ -95,9 +94,9 @@ def build_model(ratings, embedding_dim=3, init_stddev=1.):
     a_train = build_rating_sparse_tensor(train_ratings)
     a_test = build_rating_sparse_tensor(test_ratings)
     # Initialize the embeddings using a normal distribution.
-    U = tf.Variable(tf.random_normal(
+    U = tf.Variable(tf.random.normal(
         [a_train.dense_shape[0], embedding_dim], stddev=init_stddev))
-    V = tf.Variable(tf.random_normal(
+    V = tf.Variable(tf.random.normal(
         [a_train.dense_shape[1], embedding_dim], stddev=init_stddev))
     train_loss = sparse_mean_square_error(a_train, U, V)
     test_loss = sparse_mean_square_error(a_test, U, V)
@@ -179,7 +178,7 @@ class CFModel(object):
         return self._embeddings
 
     def train(self, num_iterations=100, learning_rate=1.0, plot_results=True,
-              optimizer=tf.train.GradientDescentOptimizer):
+              optimizer=tf.optimizers.SGD):
         """Trains the model.
         Args:
           num_iterations: number of iterations to run.
@@ -238,4 +237,11 @@ class CFModel(object):
 
 
 if __name__ == '__main__':
-    pass
+    ratings = get_ratings_data()
+    train_ratings, test_ratings = split_dataframe(ratings)
+    # SparseTensor representation of the train and test datasets.
+    A_train = build_rating_sparse_tensor(train_ratings)
+    A_test = build_rating_sparse_tensor(test_ratings)
+    # Build the CF model and train it.
+    model = build_model(ratings, embedding_dim=10, init_stddev=0.5)
+    model.train(num_iterations=350, learning_rate=40., plot_results=True)

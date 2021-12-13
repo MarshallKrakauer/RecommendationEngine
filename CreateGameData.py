@@ -33,11 +33,13 @@ def clean_attribute(name_string):
     return name_string
 
 
-if __name__ == '__main__':
+def create_game_data():
     game_data_initial = pd.read_csv('game_info.csv')
     game_constants = game_data_initial[['game_id', 'title', 'rating', 'bayes_rating', 'ratings', 'year']]
     mechanic_df = create_attribute_columns(game_data_initial, 'mechanic')
     category_df = create_attribute_columns(game_data_initial, 'category')
     game_constants = game_constants.merge(mechanic_df, on='game_id')
     game_constants = game_constants.merge(category_df, on='game_id')
-    game_constants.to_csv('games.csv')
+    print('printing game constants')
+    print(game_constants.head())
+    return game_constants
