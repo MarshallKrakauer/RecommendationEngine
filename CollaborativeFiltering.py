@@ -10,10 +10,10 @@ import collections
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from matplotlib import pyplot as plt
-
-from CreateGameRatingsData import get_ratings_data
+tf.compat.v1.disable_eager_execution()
+tf.logging.set_verbosity(tf.logging.ERROR)
 
 # Constants
 DOT = 'dot'
@@ -53,10 +53,11 @@ def build_rating_sparse_tensor(ratings_df):
     """
     indices = ratings_df[['user_idx', 'game_idx']].values
     values_ = ratings_df['rating_int'].values
+    tensor_shape = [ratings_df['user_idx'].nunique(), ratings_df['game_idx'].nunique()]
     return tf.SparseTensor(
         indices=indices,
         values=values_,
-        dense_shape=[ratings_df['user_idx'].nunique(), ratings_df['game_idx'].nunique()])
+        dense_shape=tensor_shape)
 
 
 def sparse_mean_square_error(sparse_ratings, user_embeddings, movie_embeddings):
@@ -71,32 +72,35 @@ def sparse_mean_square_error(sparse_ratings, user_embeddings, movie_embeddings):
       A scalar Tensor representing the MSE between the true ratings and the
         model's predictions.
     """
+    # print('SPARSE RATING INDICES:', sparse_ratings.indices)
     predictions = tf.gather_nd(
         tf.matmul(user_embeddings, movie_embeddings, transpose_b=True),
         sparse_ratings.indices)
+    # [128812, 272]
+    print('finished gather call')
     loss = tf.losses.mean_squared_error(sparse_ratings.values, predictions)
     return loss
 
 
 # noinspection PyUnresolvedReferences
-def build_model(ratings, embedding_dim=3, init_stddev=1.):
+def build_model(ratings_dataframe, embedding_dim=3, init_stddev=1.):
     """
     Args:
-      ratings: a DataFrame of the ratings
+      ratings_dataframe: a DataFrame of the ratings
       embedding_dim: the dimension of the embedding vectors.
       init_stddev: float, the standard deviation of the random initial embeddings.
     Returns:
       model: a CFModel.
     """
     # Split the ratings DataFrame into train and test.
-    train_ratings, test_ratings = split_dataframe(ratings)
+    train_ratings_0, test_ratings_0 = split_dataframe(ratings_dataframe)
     # SparseTensor representation of the train and test datasets.
-    a_train = build_rating_sparse_tensor(train_ratings)
-    a_test = build_rating_sparse_tensor(test_ratings)
+    a_train = build_rating_sparse_tensor(train_ratings_0)
+    a_test = build_rating_sparse_tensor(test_ratings_0)
     # Initialize the embeddings using a normal distribution.
-    U = tf.Variable(tf.random.normal(
+    U = tf.Variable(tf.random_normal(
         [a_train.dense_shape[0], embedding_dim], stddev=init_stddev))
-    V = tf.Variable(tf.random.normal(
+    V = tf.Variable(tf.random_normal(
         [a_train.dense_shape[1], embedding_dim], stddev=init_stddev))
     train_loss = sparse_mean_square_error(a_train, U, V)
     test_loss = sparse_mean_square_error(a_test, U, V)
@@ -111,7 +115,7 @@ def build_model(ratings, embedding_dim=3, init_stddev=1.):
     return CFModel(embeddings, train_loss, [metrics])
 
 
-def game_neighbors(model, title_substring, games, measure=DOT, k=6):
+def game_neighbors(model_0, title_substring, games, measure=DOT, k=6):
     # Search for movie ids that match the given substring.
     ids = games.loc[games['title'].str.contains(title_substring), ['game_idx']].values
     ids = list(ids.flatten())
@@ -124,7 +128,7 @@ def game_neighbors(model, title_substring, games, measure=DOT, k=6):
             ", ".join(titles[1:])))
     movie_id = ids[0]
     scores = compute_scores(
-        model.embeddings["game_idx"][movie_id], model.embeddings["game_idx"],
+        model_0.embeddings["game_idx"][movie_id], model_0.embeddings["game_idx"],
         measure)
     score_key = measure + ' score'
     df = pd.DataFrame({
@@ -178,7 +182,7 @@ class CFModel(object):
         return self._embeddings
 
     def train(self, num_iterations=100, learning_rate=1.0, plot_results=True,
-              optimizer=tf.optimizers.SGD):
+              optimizer=tf.train.GradientDescentOptimizer):
         """Trains the model.
         Args:
           num_iterations: number of iterations to run.
@@ -237,11 +241,11 @@ class CFModel(object):
 
 
 if __name__ == '__main__':
-    ratings = get_ratings_data()
+    ratings = pd.read_csv('ratings_data_0.csv').append(pd.read_csv('ratings_data_1.csv'))
     train_ratings, test_ratings = split_dataframe(ratings)
     # SparseTensor representation of the train and test datasets.
     A_train = build_rating_sparse_tensor(train_ratings)
     A_test = build_rating_sparse_tensor(test_ratings)
     # Build the CF model and train it.
     model = build_model(ratings, embedding_dim=10, init_stddev=0.5)
-    model.train(num_iterations=350, learning_rate=40., plot_results=True)
+    model.train(num_iterations=200, learning_rate=40., plot_results=True)

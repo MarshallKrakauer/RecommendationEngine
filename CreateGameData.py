@@ -40,6 +40,4 @@ def create_game_data():
     category_df = create_attribute_columns(game_data_initial, 'category')
     game_constants = game_constants.merge(mechanic_df, on='game_id')
     game_constants = game_constants.merge(category_df, on='game_id')
-    print('printing game constants')
-    print(game_constants.head())
     return game_constants
