@@ -76,8 +76,6 @@ def sparse_mean_square_error(sparse_ratings, user_embeddings, movie_embeddings):
     predictions = tf.gather_nd(
         tf.matmul(user_embeddings, movie_embeddings, transpose_b=True),
         sparse_ratings.indices)
-    # [128812, 272]
-    print('finished gather call')
     loss = tf.losses.mean_squared_error(sparse_ratings.values, predictions)
     return loss
 
@@ -237,15 +235,16 @@ class CFModel(object):
                         ax.plot(iterations, v, label=k)
                     ax.set_xlim([1, num_iterations])
                     ax.legend()
+                plt.show()
             return results
 
 
 if __name__ == '__main__':
-    ratings = pd.read_csv('ratings_data_0.csv').append(pd.read_csv('ratings_data_1.csv'))
+    ratings = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
     train_ratings, test_ratings = split_dataframe(ratings)
     # SparseTensor representation of the train and test datasets.
     A_train = build_rating_sparse_tensor(train_ratings)
     A_test = build_rating_sparse_tensor(test_ratings)
     # Build the CF model and train it.
     model = build_model(ratings, embedding_dim=10, init_stddev=0.5)
-    model.train(num_iterations=200, learning_rate=40., plot_results=True)
+    model.train(num_iterations=200, learning_rate=25., plot_results=True)
