@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import tensorflow.compat.v1 as tf
 from matplotlib import pyplot as plt
+
 tf.compat.v1.disable_eager_execution()
 tf.logging.set_verbosity(tf.logging.ERROR)
 
@@ -113,50 +114,6 @@ def build_model(ratings_dataframe, embedding_dim=3, init_stddev=1.):
     return CFModel(embeddings, train_loss, [metrics])
 
 
-def game_neighbors(model_0, title_substring, games, measure=DOT, k=6):
-    # Search for movie ids that match the given substring.
-    ids = games.loc[games['title'].str.contains(title_substring), ['game_idx']].values
-    ids = list(ids.flatten())
-    titles = games.loc[games['game_idx'].isin(ids), 'title'].values
-    if len(titles) == 0:
-        raise ValueError("Found no games with title %s" % title_substring)
-    print("Nearest neighbors of : %s." % titles[0])
-    if len(titles) > 1:
-        print("[Found more than one matching game. Other candidates: {}]".format(
-            ", ".join(titles[1:])))
-    movie_id = ids[0]
-    scores = compute_scores(
-        model_0.embeddings["game_idx"][movie_id], model_0.embeddings["game_idx"],
-        measure)
-    score_key = measure + ' score'
-    df = pd.DataFrame({
-        score_key: list(scores),
-        'titles': games['title']
-    })
-    df.sort_values('score_key', ascending=False, inplace=True)
-    print(df.head(k))
-
-
-def compute_scores(query_embedding, item_embeddings, measure=DOT):
-    """Computes the scores of the candidates given a query.
-    Args:
-      query_embedding: a vector of shape [k], representing the query embedding.
-      item_embeddings: a matrix of shape [N, k], such that row i is the embedding
-        of item i.
-      measure: a string specifying the similarity measure to be used. Can be
-        either DOT or COSINE.
-    Returns:
-      scores: a vector of shape [N], such that scores[i] is the score of item i.
-    """
-    u = query_embedding
-    V = item_embeddings
-    if measure == COSINE:
-        V = V / np.linalg.norm(V, axis=1, keepdims=True)
-        u = u / np.linalg.norm(u)
-    scores = u.dot(V.T)
-    return scores
-
-
 class CFModel(object):
     """Simple class that represents a collaborative filtering model"""
 
@@ -239,12 +196,55 @@ class CFModel(object):
             return results
 
 
+def compute_distance_scores(query_embedding, item_embeddings, measure='dot'):
+    """Computes the scores of the candidates given a query.
+    Args:
+      query_embedding: a vector of shape [k], representing the query embedding.
+      item_embeddings: a matrix of shape [N, k], such that row i is the embedding
+        of item i.
+      measure: a string specifying the similarity measure to be used. Can be
+        either DOT or COSINE.
+    Returns:
+      scores: a vector of shape [N], such that scores[i] is the score of item i.
+    """
+    if measure == 'cosine':
+        item_embeddings = item_embeddings / np.linalg.norm(item_embeddings, axis=1, keepdims=True)
+        query_embedding = query_embedding / np.linalg.norm(query_embedding)
+    scores = query_embedding.dot(item_embeddings.T)
+    return scores
+
+
+def display_top_neighbors(model_for_neighbors, title_substring, measure='dot', k=10):
+    # Search for movie ids that match the given substring.
+    ids = games.loc[games['title'].str.contains(title_substring), ['game_idx']].values
+    ids = list(ids.flatten())
+    titles = games.loc[games['game_idx'].isin(ids), 'title'].values
+    if len(titles) == 0:
+        raise ValueError("Found no games with title %s" % title_substring)
+    print("\nNearest neighbors of : %s." % titles[0])
+    if len(titles) > 1:
+        print("[Found more than one matching game. Other candidates: {}]".format(
+            ", ".join(titles[1:])))
+    movie_id = ids[0]
+    scores = compute_distance_scores(
+        model_for_neighbors.embeddings["game_idx"][movie_id], model_for_neighbors.embeddings["game_idx"],
+        measure)
+    score_key = measure + ' score'
+    df = pd.DataFrame({
+        score_key: list(scores),
+        'titles': games['title']
+    })
+    print(df.sort_values([score_key], ascending=False).head(k))
+
+
 if __name__ == '__main__':
     ratings = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
+    games = pd.read_csv('DataFiles/games.csv')
     train_ratings, test_ratings = split_dataframe(ratings)
     # SparseTensor representation of the train and test datasets.
     A_train = build_rating_sparse_tensor(train_ratings)
     A_test = build_rating_sparse_tensor(test_ratings)
     # Build the CF model and train it.
-    model = build_model(ratings, embedding_dim=10, init_stddev=0.5)
-    model.train(num_iterations=200, learning_rate=25., plot_results=True)
+    model = build_model(ratings, embedding_dim=5, init_stddev=0.5)
+    model.train(num_iterations=100, learning_rate=40., plot_results=False)
+    display_top_neighbors(model, "war_ring", 'cosine', k=10)
