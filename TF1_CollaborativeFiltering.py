@@ -227,10 +227,6 @@ if __name__ == '__main__':
     games = pd.read_csv('DataFiles/games.csv')
     train_ratings, test_ratings = split_dataframe(ratings)
 
-    # SparseTensor representation of the train and test datasets.
-    A_train = build_rating_sparse_tensor(train_ratings)
-    A_test = build_rating_sparse_tensor(test_ratings)
-
     # Build the CF model and train it.
     model = build_model(ratings, embedding_dim=5, init_stddev=0.5)
     model.train(num_iterations=100, learning_rate=40., plot_results=False)
