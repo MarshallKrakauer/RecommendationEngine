@@ -67,7 +67,6 @@ def sparse_mean_square_error(sparse_ratings, user_embeddings, movie_embeddings):
     return loss
 
 
-# noinspection PyUnresolvedReferences
 def build_model(ratings_dataframe, embedding_dim=3, init_stddev=1.):
     """
     Args:
