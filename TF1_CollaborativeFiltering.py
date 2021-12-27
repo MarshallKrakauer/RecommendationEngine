@@ -1,4 +1,7 @@
-"""Functions in file from:
+"""
+Collaborative filtering model using Tensorflow v1.
+
+Functions in file from:
 https://developers.google.com/machine-learning/recommendation/labs/movie-rec-programming-exercise
 
 Original file from here: https://github.com/MarshallKrakauer/BGGAnalysis/blob/main/Collaborative_Filtering.ipynb
