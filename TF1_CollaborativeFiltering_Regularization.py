@@ -2,8 +2,8 @@
 
 from __future__ import print_function
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import tensorflow.compat.v1 as tf
 
 from TF1_CollaborativeFiltering import CFModel, sparse_mean_square_error
@@ -59,6 +59,7 @@ def compute_distance_scores(query_embedding, item_embeddings, measure='dot'):
     scores = query_embedding.dot(item_embeddings.T)
     return scores
 
+
 def build_regularized_model(
         ratings, embedding_dim=3, regularization_coeff=.1, gravity_coeff=1.,
         init_stddev=0.1):
@@ -108,8 +109,7 @@ if __name__ == '__main__':
     train_ratings, test_ratings = split_dataframe(ratings)
 
     reg_model = build_regularized_model(
-        ratings, regularization_coeff=0.1, gravity_coeff=1.0, embedding_dim=35,
+        ratings, regularization_coeff=0.9, gravity_coeff=1.0, embedding_dim=25,
         init_stddev=0.5)
-    reg_model.train(num_iterations=100, learning_rate=40.)
-    display_top_neighbors(reg_model, "caverna", 'cosine', k=10)
-
+    reg_model.train(num_iterations=100, learning_rate=20.)
+    display_top_neighbors(reg_model, "viticulture_essential_edition", 'dot', k=10)
