@@ -16,20 +16,6 @@ from matplotlib import pyplot as plt
 tf.compat.v1.disable_eager_execution()
 tf.logging.set_verbosity(tf.logging.ERROR)
 
-# Constants
-DOT = 'dot'
-COSINE = 'cosine'
-
-
-def mask(df, key, function):
-    """Returns a filtered dataframe, by applying function to key"""
-    return df[function(df[key])]
-
-
-def flatten_cols(df):
-    df.columns = [' '.join(col).strip() for col in df.columns]
-    return df
-
 
 def split_dataframe(df, holdout_fraction=0.1):
     """Splits a DataFrame into training and test sets.
@@ -241,9 +227,11 @@ if __name__ == '__main__':
     ratings = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
     games = pd.read_csv('DataFiles/games.csv')
     train_ratings, test_ratings = split_dataframe(ratings)
+
     # SparseTensor representation of the train and test datasets.
     A_train = build_rating_sparse_tensor(train_ratings)
     A_test = build_rating_sparse_tensor(test_ratings)
+
     # Build the CF model and train it.
     model = build_model(ratings, embedding_dim=5, init_stddev=0.5)
     model.train(num_iterations=100, learning_rate=40., plot_results=False)
