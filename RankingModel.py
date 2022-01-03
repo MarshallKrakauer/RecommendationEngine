@@ -1,12 +1,16 @@
 """Ranking Model using TF Version 2.
 
 Based on the code from this page: https://www.tensorflow.org/recommenders/examples/basic_ranking
+
+Variable names currently refer to movies. This will be changed in future versions.
 """
+
+import logging
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import copy
+import tensorflow_recommenders as tfrs
 
 
 class RankingModel(tf.keras.Model):
@@ -41,7 +45,7 @@ class RankingModel(tf.keras.Model):
             tf.keras.layers.Dense(1)
         ])
 
-    def call(self, inputs, **kwargs):
+    def __call__(self, inputs, **kwargs):
         user_id, movie_title = inputs
 
         user_embedding = self.user_embeddings(user_id)
@@ -50,26 +54,76 @@ class RankingModel(tf.keras.Model):
         return self.ratings(tf.concat([user_embedding, movie_embedding], axis=1))
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    tf.autograph.set_verbosity(0)
-    tf.random.set_seed(0)
+class BGGModel(tfrs.models.Model):
 
-    ratings = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
-    ratings = ratings[['ratings', 'user_idx', 'game_idx']]
-    original_ratings = copy.deepcopy(ratings)
-    value_dict = {name: values for name, values in ratings.items()}
-    value_dict['ratings'] = np.asarray(value_dict['ratings'].astype('float32'))
+    def __init__(self):
+        super().__init__()
+        self.ranking_model: tf.keras.Model = RankingModel()
+        self.task: tf.keras.layers.Layer = tfrs.tasks.Ranking(
+            loss=tf.keras.losses.MeanSquaredError(),
+            metrics=[tf.keras.metrics.RootMeanSquaredError()])
+
+    def __call__(self, features):
+        return self.ranking_model(
+            (features["user_idx"], features["game_idx"]))
+
+    def compute_loss(self, features, training=False):
+        labels = features.pop("rating")
+
+        rating_predictions = self(features)
+
+        # The task computes the loss and the metrics.
+        return self.task(labels=labels, predictions=rating_predictions)
+
+
+def get_ratings_data():
+    ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
+    ratings_original = ratings_original[['ratings', 'user_idx', 'game_idx']]
+    ratings_original.rename(columns={'ratings': 'rating'}, inplace=True)
+    value_dict = {name: values for name, values in ratings_original.items()}
+    value_dict['rating'] = np.asarray(value_dict['rating'].astype('float32'))
     value_dict['user_idx'] = np.asarray(value_dict['user_idx'].astype('string'))
     value_dict['game_idx'] = np.asarray(value_dict['game_idx'].astype('string'))
+
     ratings = tf.data.Dataset.from_tensor_slices(value_dict)
-    shuffled = ratings.shuffle(400_000, seed=0, reshuffle_each_iteration=False)
-    train = shuffled.take(80_000)
-    test = shuffled.skip(80_000).take(20_000)
+    return ratings.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
+
+
+if __name__ == '__main__':
+    # tf.autograph.set_verbosity(100)
+    tf.get_logger().setLevel(logging.ERROR)
+    tf.random.set_seed(0)
+
+    ratings = get_ratings_data()
+
+    train = ratings.take(3_000_000)
+    test = ratings.skip(3_000_000).take(4_000_000)
     movie_titles = ratings.batch(1_000_000).map(lambda x: x["game_idx"])
     user_ids = ratings.batch(1_000_000).map(lambda x: x["user_idx"])
 
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
     unique_user_ids = np.unique(np.concatenate(list(user_ids)))
-    print(RankingModel()((['0'], ['0'])))
 
+    # 244 is Gloomhaven, 22 is a user who rated it a 10
+    model = RankingModel()
+    result_ = model((['22'], ['244']))
+    print('Gloomhaven ranking:', result_)
+
+    model = BGGModel()
+    model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
+    cached_train = train.shuffle(100_000).batch(8192).cache()
+    cached_test = test.batch(4096).cache()
+    model.fit(cached_train, epochs=3)
+    model.evaluate(cached_test, return_dict=True)
+
+    test_ratings = {}
+    test_movie_titles = ['22', "Dances with Wolves (1990)", "Speed (1994)"]
+    for movie_title in test_movie_titles:
+        test_ratings[movie_title] = model({
+            "user_id": np.array(["42"]),
+            "movie_title": np.array([movie_title])
+        })
+
+    print("Ratings:")
+    for title, score in sorted(test_ratings.items(), key=lambda x: x[1], reverse=True):
+        print(f"{title}: {score}")
