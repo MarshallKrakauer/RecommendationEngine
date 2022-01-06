@@ -104,11 +104,6 @@ if __name__ == '__main__':
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
     unique_user_ids = np.unique(np.concatenate(list(user_ids)))
 
-    # 244 is Gloomhaven, 22 is a user who rated it a 10
-    model = RankingModel()
-    result_ = model((['22'], ['244']))
-    print('Gloomhaven ranking:', result_)
-
     model = BGGModel()
     model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
     cached_train = train.shuffle(100_000).batch(8192).cache()
@@ -117,11 +112,11 @@ if __name__ == '__main__':
     model.evaluate(cached_test, return_dict=True)
 
     test_ratings = {}
-    test_movie_titles = ['22', "Dances with Wolves (1990)", "Speed (1994)"]
+    test_movie_titles = ['244', "9", "273", "1", "278", "16"]
     for movie_title in test_movie_titles:
         test_ratings[movie_title] = model({
-            "user_id": np.array(["42"]),
-            "movie_title": np.array([movie_title])
+            "user_idx": np.array(["22"]),
+            "game_idx": np.array([movie_title])
         })
 
     print("Ratings:")
