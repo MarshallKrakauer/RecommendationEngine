@@ -8,27 +8,26 @@ Work in progress. Model does not currently run
 """
 
 import logging
+import os
 from typing import Dict, Text
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
-import tempfile
-import os
 
 
 def get_ratings_data():
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
-    ratings_original = ratings_original[['ratings', 'user_idx', 'game_idx']]
-    ratings_original.rename(columns={'ratings': 'rating'}, inplace=True)
+    ratings_original = ratings_original[['rating_int', 'user_idx', 'game_idx']]
+    ratings_original.rename(columns={'rating_int': 'rating'}, inplace=True)
     value_dict = {name: values for name, values in ratings_original.items()}
     value_dict['rating'] = np.asarray(value_dict['rating'].astype('float32'))
     value_dict['user_idx'] = np.asarray(value_dict['user_idx'].astype('string'))
     value_dict['game_idx'] = np.asarray(value_dict['game_idx'].astype('string'))
 
-    ratings = tf.data.Dataset.from_tensor_slices(value_dict)
-    return ratings.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
+    ratings_tf = tf.data.Dataset.from_tensor_slices(value_dict)
+    return ratings_tf.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
 
 
 def get_games_data():
@@ -37,22 +36,25 @@ def get_games_data():
     games_raw['game_idx'] = games_raw['game_idx'].astype('string')
     games_raw['year'] = games_raw['year'].astype('int32')
     games_raw['rating'] = games_raw['rating'].astype('int32')
-    print(games_raw.dtypes)
     # value_dict = {name: values for name, values in games_small.items()}
     game_idx_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['game_idx'].values))
+
+    '''
+    Commented out. Side features may be used in more advanced model
     year_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['year'].values))
     rating_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['rating'].values))
     data = tf.data.Dataset.zip((game_idx_vals, year_vals, rating_vals))
+    '''
 
     return game_idx_vals
 
 
-class MovielensModel(tfrs.Model):
+class BGGRetrievalModel(tfrs.Model):
 
-    def __init__(self, user_model, movie_model):
+    def __init__(self, user_model_retrieval, movie_model_retrieval):
         super().__init__()
-        self.movie_model: tf.keras.Model = movie_model
-        self.user_model: tf.keras.Model = user_model
+        self.movie_model: tf.keras.Model = movie_model_retrieval
+        self.user_model: tf.keras.Model = user_model_retrieval
         self.task: tf.keras.layers.Layer = task
 
     def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
@@ -100,7 +102,7 @@ if __name__ == '__main__':
 
     task = tfrs.tasks.Retrieval(metrics=metrics)
 
-    model = MovielensModel(user_model, movie_model)
+    model = BGGRetrievalModel(user_model, movie_model)
     model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
 
     cached_train = train.shuffle(1_000_000).batch(5_000).cache()
@@ -121,12 +123,14 @@ if __name__ == '__main__':
     _, titles = index(tf.constant(["22"]))
     print(f"Recommendations for user 22: {titles[0, :3]}")
 
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "model")
+    path = os.getcwd() + '\\model'
+    # Save the index.
+    tf.saved_model.save(
+        index,
+        path,
+        options=tf.saved_model.SaveOptions()
+    )
 
-        # Save the index.
-        tf.saved_model.save(
-            index,
-            path,
-            options=tf.saved_model.SaveOptions(namespace_whitelist=["Scann"])
-        )
+    loaded = tf.saved_model.load(path)
+
+    scores, titles = loaded(["100"])
