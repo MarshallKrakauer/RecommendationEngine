@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
+import tempfile
+import os
 
 
 def get_ratings_data():
@@ -42,7 +44,7 @@ def get_games_data():
     rating_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['rating'].values))
     data = tf.data.Dataset.zip((game_idx_vals, year_vals, rating_vals))
 
-    return data
+    return game_idx_vals
 
 
 class MovielensModel(tfrs.Model):
@@ -101,9 +103,30 @@ if __name__ == '__main__':
     model = MovielensModel(user_model, movie_model)
     model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
 
-    cached_train = train.shuffle(1_000_000).batch(8192).cache()
+    cached_train = train.shuffle(1_000_000).batch(5_000).cache()
     cached_test = test.batch(4096).cache()
 
-    model.fit(cached_train, epochs=3)
+    model.fit(cached_train, epochs=1)
 
+    model.evaluate(cached_test, return_dict=True)
 
+    # Create a model that takes in raw query features, and
+    index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
+    # recommends movies out of the entire movies dataset.
+    index.index_from_dataset(
+        tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model)))
+    )
+
+    # Get recommendations.
+    _, titles = index(tf.constant(["22"]))
+    print(f"Recommendations for user 22: {titles[0, :3]}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "model")
+
+        # Save the index.
+        tf.saved_model.save(
+            index,
+            path,
+            options=tf.saved_model.SaveOptions(namespace_whitelist=["Scann"])
+        )
