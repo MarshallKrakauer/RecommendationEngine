@@ -1,19 +1,20 @@
 """Retrieval Model using TF Version 2.
 
 Based on the code from this page: https://www.tensorflow.org/recommenders/examples/basic_retrieval
+
+Some code will contain "movie" terminology to match Google's code. This will be changed later.
+
+Work in progress. Model does not currently run
 """
 
 import logging
-import os
-import pprint
-import tempfile
-
 from typing import Dict, Text
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
+
 
 def get_ratings_data():
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
@@ -27,16 +28,41 @@ def get_ratings_data():
     ratings = tf.data.Dataset.from_tensor_slices(value_dict)
     return ratings.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
 
+
 def get_games_data():
     games_raw = pd.read_csv('DataFiles/games.csv')
-    games_small = games_raw[['game_idx', 'year', 'rating']]
+    games_raw = games_raw[['game_idx', 'year', 'rating']]
+    games_raw['game_idx'] = games_raw['game_idx'].astype('string')
+    games_raw['year'] = games_raw['year'].astype('int32')
+    games_raw['rating'] = games_raw['rating'].astype('int32')
+    print(games_raw.dtypes)
     # value_dict = {name: values for name, values in games_small.items()}
     game_idx_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['game_idx'].values))
-    year_vals = tf.data.Dataset.from_tensor_slices(games_raw['year'].values)
-    rating_vals = tf.data.Dataset.from_tensor_slices(games_raw['rating'].values)
+    year_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['year'].values))
+    rating_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['rating'].values))
     data = tf.data.Dataset.zip((game_idx_vals, year_vals, rating_vals))
 
     return data
+
+
+class MovielensModel(tfrs.Model):
+
+    def __init__(self, user_model, movie_model):
+        super().__init__()
+        self.movie_model: tf.keras.Model = movie_model
+        self.user_model: tf.keras.Model = user_model
+        self.task: tf.keras.layers.Layer = task
+
+    def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
+        # We pick out the user features and pass them into the user model.
+        user_embeddings = self.user_model(features["user_idx"])
+        # And pick out the movie features and pass them into the movie model,
+        # getting embeddings back.
+        positive_movie_embeddings = self.movie_model(features["game_idx"])
+
+        # The task computes the loss and the metrics.
+        return self.task(user_embeddings, positive_movie_embeddings)
+
 
 if __name__ == '__main__':
     # tf.autograph.set_verbosity(100)
@@ -70,4 +96,14 @@ if __name__ == '__main__':
     metrics = tfrs.metrics.FactorizedTopK(
         candidates=games.batch(128).map(movie_model))
 
-    print("testing")
+    task = tfrs.tasks.Retrieval(metrics=metrics)
+
+    model = MovielensModel(user_model, movie_model)
+    model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
+
+    cached_train = train.shuffle(1_000_000).batch(8192).cache()
+    cached_test = test.batch(4096).cache()
+
+    model.fit(cached_train, epochs=3)
+
+
