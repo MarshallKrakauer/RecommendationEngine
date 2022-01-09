@@ -17,8 +17,28 @@ import tensorflow as tf
 import tensorflow_recommenders as tfrs
 
 PATH = os.getcwd() + '\\model'
-EPOCHS = 3
+EPOCHS = 1
 DIMENSIONS = 12
+SAVE_MODEL = False
+
+
+class BGGRetrievalModel(tfrs.Model):
+
+    def __init__(self, user_model_retrieval, movie_model_retrieval, task):
+        super().__init__()
+        self.movie_model: tf.keras.Model = movie_model_retrieval
+        self.user_model: tf.keras.Model = user_model_retrieval
+        self.task: tf.keras.layers.Layer = task
+
+    def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
+        # We pick out the user features and pass them into the user model.
+        user_embeddings = self.user_model(features["user_idx"])
+        # And pick out the movie features and pass them into the movie model,
+        # getting embeddings back.
+        positive_movie_embeddings = self.movie_model(features["title"])
+
+        # The task computes the loss and the metrics.
+        return self.task(user_embeddings, positive_movie_embeddings)
 
 
 def get_ratings_data():
@@ -56,32 +76,10 @@ def get_games_data():
     return game_idx_vals
 
 
-class BGGRetrievalModel(tfrs.Model):
-
-    def __init__(self, user_model_retrieval, movie_model_retrieval):
-        super().__init__()
-        self.movie_model: tf.keras.Model = movie_model_retrieval
-        self.user_model: tf.keras.Model = user_model_retrieval
-        self.task: tf.keras.layers.Layer = task
-
-    def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
-        # We pick out the user features and pass them into the user model.
-        user_embeddings = self.user_model(features["user_idx"])
-        # And pick out the movie features and pass them into the movie model,
-        # getting embeddings back.
-        positive_movie_embeddings = self.movie_model(features["title"])
-
-        # The task computes the loss and the metrics.
-        return self.task(user_embeddings, positive_movie_embeddings)
-
-
-if __name__ == '__main__':
-    tf.get_logger().setLevel(logging.ERROR)
-    tf.random.set_seed(0)
-
+def get_setup_info():
     ratings = get_ratings_data()
-    train = ratings.take(3_000_000)
-    test = ratings.skip(3_000_000).take(800_000)
+    ratings_train = ratings.take(3_000_000)
+    ratings_test = ratings.skip(3_000_000).take(800_000)
     movie_titles = ratings.batch(300).map(lambda x: x["title"])
     user_ids = ratings.batch(1_000_000).map(lambda x: x["user_idx"])
 
@@ -90,41 +88,55 @@ if __name__ == '__main__':
 
     embedding_dimension = DIMENSIONS
 
-    user_model = tf.keras.Sequential([
+    bgg_user_model = tf.keras.Sequential([
         tf.keras.layers.StringLookup(
             vocabulary=unique_user_ids, mask_token=None),
         # We add an additional embedding to account for unknown tokens.
         tf.keras.layers.Embedding(len(unique_user_ids) + 1, embedding_dimension)])
 
-    movie_model = tf.keras.Sequential([
+    bgg_movie_model = tf.keras.Sequential([
         tf.keras.layers.StringLookup(
             vocabulary=unique_movie_titles, mask_token=None),
         tf.keras.layers.Embedding(len(unique_movie_titles) + 1, embedding_dimension)])
 
-    games = get_games_data()
+    return ratings_train, ratings_test, bgg_user_model, bgg_movie_model
 
+
+def train_tensorflow_model(train, test, user_model, movie_model, games):
     metrics = tfrs.metrics.FactorizedTopK(
-        candidates=games.batch(128).map(movie_model))
+        candidates=games.batch(64).map(movie_model))
 
     task = tfrs.tasks.Retrieval(metrics=metrics)
 
-    model = BGGRetrievalModel(user_model, movie_model)
-    model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
+    retrieval_model = BGGRetrievalModel(user_model, movie_model, task)
+    retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
 
     cached_train = train.shuffle(1_000_000).batch(5_000).cache()
     cached_test = test.batch(4096).cache()
 
-    model.fit(cached_train, epochs=EPOCHS)
+    retrieval_model.fit(cached_train, epochs=EPOCHS)
 
-    return_dict = model.evaluate(cached_test, return_dict=True)
+    return_dict = retrieval_model.evaluate(cached_test, return_dict=True)
+    print('~~~Evaluation Results~~~')
     print(return_dict)
+    return retrieval_model
 
-    # Create a model that takes in raw query features, and
-    index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
-    # recommends movies out of the entire movies dataset.
-    index.index_from_dataset(
-        tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model)))
-    )
 
-    # Save the index.
-    tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
+if __name__ == '__main__':
+    tf.get_logger().setLevel(logging.ERROR)
+    tf.random.set_seed(0)
+
+    train_0, test_0, user_model_0, game_model_0 = get_setup_info()
+    games_dataframe = get_games_data()
+    model = train_tensorflow_model(train_0, test_0, user_model_0, game_model_0, games_dataframe)
+
+    if SAVE_MODEL:
+        # Create a model that takes in raw query features, and
+        index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
+        # recommends movies out of the entire movies dataset.
+        index.index_from_dataset(
+            tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model)))
+        )
+
+        # Save the index.
+        tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
