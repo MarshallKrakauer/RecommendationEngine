@@ -8,9 +8,9 @@ Work in progress. Model does not currently run
 """
 
 import logging
-import os
 from typing import Dict, Text
 
+import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -20,24 +20,27 @@ import tensorflow_recommenders as tfrs
 def get_ratings_data():
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
     ratings_original = ratings_original[['rating_int', 'user_idx', 'game_idx']]
+    title_join = pd.read_csv('DataFiles/games.csv')
+    title_join = title_join[['game_idx', 'title']]
+    title_join.drop_duplicates(inplace=True)
+    ratings_original = ratings_original.merge(title_join, on='game_idx')
     ratings_original.rename(columns={'rating_int': 'rating'}, inplace=True)
     value_dict = {name: values for name, values in ratings_original.items()}
     value_dict['rating'] = np.asarray(value_dict['rating'].astype('float32'))
     value_dict['user_idx'] = np.asarray(value_dict['user_idx'].astype('string'))
     value_dict['game_idx'] = np.asarray(value_dict['game_idx'].astype('string'))
-
     ratings_tf = tf.data.Dataset.from_tensor_slices(value_dict)
     return ratings_tf.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
 
 
 def get_games_data():
     games_raw = pd.read_csv('DataFiles/games.csv')
-    games_raw = games_raw[['game_idx', 'year', 'rating']]
-    games_raw['game_idx'] = games_raw['game_idx'].astype('string')
+    games_raw = games_raw[['title', 'year', 'rating']]
+    games_raw['title'] = games_raw['title'].astype('string')
     games_raw['year'] = games_raw['year'].astype('int32')
     games_raw['rating'] = games_raw['rating'].astype('int32')
     # value_dict = {name: values for name, values in games_small.items()}
-    game_idx_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['game_idx'].values))
+    game_idx_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['title'].values))
 
     '''
     Commented out. Side features may be used in more advanced model
@@ -62,7 +65,7 @@ class BGGRetrievalModel(tfrs.Model):
         user_embeddings = self.user_model(features["user_idx"])
         # And pick out the movie features and pass them into the movie model,
         # getting embeddings back.
-        positive_movie_embeddings = self.movie_model(features["game_idx"])
+        positive_movie_embeddings = self.movie_model(features["title"])
 
         # The task computes the loss and the metrics.
         return self.task(user_embeddings, positive_movie_embeddings)
@@ -72,11 +75,13 @@ if __name__ == '__main__':
     # tf.autograph.set_verbosity(100)
     tf.get_logger().setLevel(logging.ERROR)
     tf.random.set_seed(0)
+    path_ = os.getcwd() + '\\model'
+    print(path_)
 
     ratings = get_ratings_data()
     train = ratings.take(3_000_000)
-    test = ratings.skip(3_000_000).take(1_000_000)
-    movie_titles = ratings.batch(1_000).map(lambda x: x["game_idx"])
+    test = ratings.skip(3_000_000).take(800_000)
+    movie_titles = ratings.batch(300).map(lambda x: x["title"])
     user_ids = ratings.batch(1_000_000).map(lambda x: x["user_idx"])
 
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
@@ -124,14 +129,14 @@ if __name__ == '__main__':
     _, titles = index(tf.constant(["22"]))
     print(f"Recommendations for user 22: {titles[0, :3]}")
 
-    path = os.getcwd() + '\\model'
+
     # Save the index.
     tf.saved_model.save(
         index,
-        path,
+        path_,
         options=tf.saved_model.SaveOptions()
     )
 
-    loaded = tf.saved_model.load(path)
+    loaded = tf.saved_model.load(path_)
 
     scores, titles = loaded(["100"])
