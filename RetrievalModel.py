@@ -16,6 +16,10 @@ import pandas as pd
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
 
+PATH = os.getcwd() + '\\model'
+EPOCHS = 3
+DIMENSIONS = 12
+
 
 def get_ratings_data():
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
@@ -72,11 +76,8 @@ class BGGRetrievalModel(tfrs.Model):
 
 
 if __name__ == '__main__':
-    # tf.autograph.set_verbosity(100)
     tf.get_logger().setLevel(logging.ERROR)
     tf.random.set_seed(0)
-    path_ = os.getcwd() + '\\model'
-    print(path_)
 
     ratings = get_ratings_data()
     train = ratings.take(3_000_000)
@@ -87,7 +88,7 @@ if __name__ == '__main__':
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
     unique_user_ids = np.unique(np.concatenate(list(user_ids)))
 
-    embedding_dimension = 10
+    embedding_dimension = DIMENSIONS
 
     user_model = tf.keras.Sequential([
         tf.keras.layers.StringLookup(
@@ -113,7 +114,7 @@ if __name__ == '__main__':
     cached_train = train.shuffle(1_000_000).batch(5_000).cache()
     cached_test = test.batch(4096).cache()
 
-    model.fit(cached_train, epochs=1)
+    model.fit(cached_train, epochs=EPOCHS)
 
     return_dict = model.evaluate(cached_test, return_dict=True)
     print(return_dict)
@@ -125,18 +126,5 @@ if __name__ == '__main__':
         tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model)))
     )
 
-    # Get recommendations.
-    _, titles = index(tf.constant(["22"]))
-    print(f"Recommendations for user 22: {titles[0, :3]}")
-
-
     # Save the index.
-    tf.saved_model.save(
-        index,
-        path_,
-        options=tf.saved_model.SaveOptions()
-    )
-
-    loaded = tf.saved_model.load(path_)
-
-    scores, titles = loaded(["100"])
+    tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
