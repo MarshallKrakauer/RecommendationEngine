@@ -75,8 +75,8 @@ if __name__ == '__main__':
 
     ratings = get_ratings_data()
     train = ratings.take(3_000_000)
-    test = ratings.skip(3_000_000).take(4_000_000)
-    movie_titles = ratings.batch(1_000_000).map(lambda x: x["game_idx"])
+    test = ratings.skip(3_000_000).take(1_000_000)
+    movie_titles = ratings.batch(1_000).map(lambda x: x["game_idx"])
     user_ids = ratings.batch(1_000_000).map(lambda x: x["user_idx"])
 
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
@@ -110,7 +110,8 @@ if __name__ == '__main__':
 
     model.fit(cached_train, epochs=1)
 
-    model.evaluate(cached_test, return_dict=True)
+    return_dict = model.evaluate(cached_test, return_dict=True)
+    print(return_dict)
 
     # Create a model that takes in raw query features, and
     index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
