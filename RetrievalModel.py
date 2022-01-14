@@ -93,7 +93,6 @@ def get_setup_info():
     """
     Fetches train and test data for the retrieval model, as well as the internal user and game model
 
-
     :return:
         ratings_train tf Dataset with rating data for training
         ratings_test tf Dataset with rating data for testing
@@ -174,9 +173,7 @@ if __name__ == '__main__':
         # Create a model that takes in raw query features, and
         index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
         # recommends movies out of the entire movies dataset.
-        index.index_from_dataset(
-            tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model)))
-        )
+        index.index_from_dataset(tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model))))
 
         # Save the index.
         tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
