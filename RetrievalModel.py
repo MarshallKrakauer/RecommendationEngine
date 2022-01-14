@@ -42,6 +42,13 @@ class BGGRetrievalModel(tfrs.Model):
 
 
 def get_ratings_data():
+    """
+    Imports ratings dataframe with user index, game index, rating, and title
+
+    :return: tf.Dataset
+        Dataset of ratings with user and game label
+    """
+
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
     ratings_original = ratings_original[['rating_int', 'user_idx', 'game_idx']]
     title_join = pd.read_csv('DataFiles/games.csv')
@@ -58,12 +65,18 @@ def get_ratings_data():
 
 
 def get_games_data():
+    """
+    Create tensorflow data for information on individual board games
+
+    :return: iterable
+        List of game titles
+    """
     games_raw = pd.read_csv('DataFiles/games.csv')
     games_raw = games_raw[['title', 'year', 'rating']]
     games_raw['title'] = games_raw['title'].astype('string')
     games_raw['year'] = games_raw['year'].astype('int32')
     games_raw['rating'] = games_raw['rating'].astype('int32')
-    # value_dict = {name: values for name, values in games_small.items()}
+    # value_dict = {name: values for name, values in games_small.items()}  # Not currently in use
     game_idx_vals = tf.data.Dataset.from_tensor_slices(list(games_raw['title'].values))
 
     '''
@@ -77,6 +90,17 @@ def get_games_data():
 
 
 def get_setup_info():
+    """
+    Fetches train and test data for the retrieval model, as well as the internal user and game model
+
+
+    :return:
+        ratings_train tf Dataset with rating data for training
+        ratings_test tf Dataset with rating data for testing
+        bgg_user_model Sequential model to embed user info
+        bgg_game_model Sequential model to embed game info
+    """
+
     ratings = get_ratings_data()
     ratings_train = ratings.take(3_000_000)
     ratings_test = ratings.skip(3_000_000).take(800_000)
@@ -94,15 +118,31 @@ def get_setup_info():
         # We add an additional embedding to account for unknown tokens.
         tf.keras.layers.Embedding(len(unique_user_ids) + 1, embedding_dimension)])
 
-    bgg_movie_model = tf.keras.Sequential([
+    bgg_game_model = tf.keras.Sequential([
         tf.keras.layers.StringLookup(
             vocabulary=unique_movie_titles, mask_token=None),
         tf.keras.layers.Embedding(len(unique_movie_titles) + 1, embedding_dimension)])
 
-    return ratings_train, ratings_test, bgg_user_model, bgg_movie_model
+    return ratings_train, ratings_test, bgg_user_model, bgg_game_model
 
 
 def train_tensorflow_model(train, test, user_model, movie_model, games):
+    """
+    Given input data, trains the retrieval model that can select the top recommended games for a user.
+
+    :param train: tf Dataset
+     dataset to model on
+    :param test: tf Dataset
+        dataset from which to judge model fit
+    :param user_model: tf Sequential Model
+        Lower dimensional embedding of user data
+    :param movie_model: tf Sequential Model
+        Lower dimensional embedding of game data
+    :param games: pd Dataframe
+        Data containing index, title, and other info for games
+    :return: BGGRetrievalModel object
+        Retrieval model that selects top N recommended games for a user
+    """
     metrics = tfrs.metrics.FactorizedTopK(
         candidates=games.batch(64).map(movie_model))
 
