@@ -17,9 +17,9 @@ import tensorflow as tf
 import tensorflow_recommenders as tfrs
 
 PATH = os.getcwd() + '\\model'
-EPOCHS = 1
-DIMENSIONS = 12
-SAVE_MODEL = False
+EPOCHS = 3
+DIMENSIONS = 10
+SAVE_MODEL = True
 
 
 class BGGRetrievalModel(tfrs.Model):
@@ -164,6 +164,25 @@ def train_tensorflow_model(train, test, user_model, movie_model, games):
 if __name__ == '__main__':
     tf.get_logger().setLevel(logging.ERROR)
     tf.random.set_seed(0)
+
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        # Create 3 virtual GPUs with 1GB memory each
+        try:
+            tf.config.set_logical_device_configuration(
+                gpus[0],
+                [tf.config.LogicalDeviceConfiguration(memory_limit=1024),
+                 tf.config.LogicalDeviceConfiguration(memory_limit=1024),
+                 tf.config.LogicalDeviceConfiguration(memory_limit=1024),
+                 ]
+            )
+            logical_gpus = tf.config.list_logical_devices("GPU")
+            print(len(gpus), "Physical GPU,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Virtual devices must be set before GPUs have been initialized
+            print(e)
+
+    strategy = tf.distribute.MirroredStrategy()
 
     train_0, test_0, user_model_0, game_model_0 = get_setup_info()
     games_dataframe = get_games_data()
