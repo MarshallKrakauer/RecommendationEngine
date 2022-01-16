@@ -18,8 +18,8 @@ import tensorflow_recommenders as tfrs
 
 PATH = os.getcwd() + '\\model'
 EPOCHS = 1
-DIMENSIONS = 12
-SAVE_MODEL = False
+DIMENSIONS = 8
+SAVE_MODEL = True
 
 
 class BGGRetrievalModel(tfrs.Model):
@@ -99,7 +99,6 @@ def get_setup_info():
         bgg_user_model Sequential model to embed user info
         bgg_game_model Sequential model to embed game info
     """
-
     ratings = get_ratings_data()
     ratings_train = ratings.take(3_000_000)
     ratings_test = ratings.skip(3_000_000).take(800_000)
@@ -173,7 +172,8 @@ if __name__ == '__main__':
         # Create a model that takes in raw query features, and
         index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
         # recommends movies out of the entire movies dataset.
-        index.index_from_dataset(tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model))))
+        index.index_from_dataset(tf.data.Dataset.zip((games_dataframe.batch(100),
+                                                      games_dataframe.batch(100).map(model.movie_model))))
 
         # Save the index.
         tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
