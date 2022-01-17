@@ -17,8 +17,9 @@ import tensorflow as tf
 import tensorflow_recommenders as tfrs
 
 PATH = os.getcwd() + '\\model'
-EPOCHS = 3
+EPOCHS = 1
 DIMENSIONS = 10
+GAMES_BATCH = 20
 SAVE_MODEL = True
 
 
@@ -103,8 +104,8 @@ def get_setup_info():
     ratings = get_ratings_data()
     ratings_train = ratings.take(3_000_000)
     ratings_test = ratings.skip(3_000_000).take(800_000)
-    movie_titles = ratings.batch(300).map(lambda x: x["title"])
-    user_ids = ratings.batch(1_000_000).map(lambda x: x["user_idx"])
+    movie_titles = ratings.batch(GAMES_BATCH).map(lambda x: x["title"])
+    user_ids = ratings.batch(1_000).map(lambda x: x["user_idx"])
 
     unique_movie_titles = np.unique(np.concatenate(list(movie_titles)))
     unique_user_ids = np.unique(np.concatenate(list(user_ids)))
@@ -155,9 +156,9 @@ def train_tensorflow_model(train, test, user_model, movie_model, games):
 
     retrieval_model.fit(cached_train, epochs=EPOCHS)
 
-    return_dict = retrieval_model.evaluate(cached_test, return_dict=True)
     print('~~~Evaluation Results~~~')
-    print(return_dict)
+    retrieval_model.evaluate(cached_test, return_dict=True)
+
     return retrieval_model
 
 
@@ -185,14 +186,15 @@ if __name__ == '__main__':
     strategy = tf.distribute.MirroredStrategy()
 
     train_0, test_0, user_model_0, game_model_0 = get_setup_info()
-    games_dataframe = get_games_data()
-    model = train_tensorflow_model(train_0, test_0, user_model_0, game_model_0, games_dataframe)
+    games_tf_data = get_games_data()
+    model = train_tensorflow_model(train_0, test_0, user_model_0, game_model_0, games_tf_data)
 
     if SAVE_MODEL:
         # Create a model that takes in raw query features, and
         index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
         # recommends movies out of the entire movies dataset.
-        index.index_from_dataset(tf.data.Dataset.zip((games.batch(100), games.batch(100).map(model.movie_model))))
+        index.index_from_dataset(tf.data.Dataset.zip((games_tf_data.batch(GAMES_BATCH),
+                                                      games_tf_data.batch(GAMES_BATCH).map(model.movie_model))))
 
         # Save the index.
         tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
