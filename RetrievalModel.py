@@ -75,11 +75,11 @@ class UserModel(tf.keras.Model):
 
 class BGGRetrievalModel(tfrs.Model):
 
-    def __init__(self, user_model_retrieval, movie_model_retrieval, task):
+    def __init__(self, user_model_retrieval, movie_model_retrieval, retrieval_task):
         super().__init__()
         self.movie_model: tf.keras.Model = movie_model_retrieval
         self.user_model: tf.keras.Model = user_model_retrieval
-        self.task: tf.keras.layers.Layer = task
+        self.task: tf.keras.layers.Layer = retrieval_task
 
     def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
         # We pick out the user features and pass them into the user model.
@@ -171,8 +171,6 @@ if __name__ == '__main__':
 
     game_titles = game_info_original.map(lambda x: x['title'])
     game_years = game_info_original.map(lambda x: x['year'])
-
-
 
     #  Obtain user ratings and organize for tensorflow
     ratings = get_ratings_data()
