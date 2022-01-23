@@ -32,22 +32,27 @@ class GameModel(tfrs.Model):
         self.title_embedding = tf.keras.Sequential([
             tf.keras.layers.StringLookup(
                 vocabulary=unique_game_titles),
-            tf.keras.layers.Embedding(len(unique_game_titles) + 1, DIMENSIONS)
-        ])
+            tf.keras.layers.Embedding(len(unique_game_titles) + 1, DIMENSIONS)])
 
-        self.title_vectorizer = tf.keras.layers.Discretization(num_bins=YEAR_BINS)
-
+        # Make year variable discrete
+        self.discrete_years = tf.keras.layers.Discretization(num_bins=YEAR_BINS)
         self.year_embedding = tf.keras.Sequential([
-            self.title_vectorizer,
-            tf.keras.layers.Embedding(YEAR_BINS, 10, mask_zero=True),
-        ])
+            self.discrete_years,
+            tf.keras.layers.Embedding(YEAR_BINS, 10, mask_zero=True)])
+        self.discrete_years.adapt(game_years)
 
-        self.title_vectorizer.adapt(game_years)
+        # Make Num of Ratings variable discrete
+        self.discrete_num_ratings = tf.keras.layers.Discretization(num_bins=YEAR_BINS)
+        self.num_ratings_embedding = tf.keras.Sequential([
+            self.discrete_num_ratings,
+            tf.keras.layers.Embedding(YEAR_BINS, 10, mask_zero=True)])
+        self.discrete_num_ratings.adapt(game_num_ratings)
 
     def call(self, inputs):
         return tf.concat([
             self.title_embedding(inputs['title']),
             self.year_embedding(inputs['year']),
+            self.num_ratings_embedding(inputs['num_ratings']),
         ], axis=1)
 
 
@@ -62,14 +67,20 @@ class UserModel(tf.keras.Model):
             tf.keras.layers.Embedding(len(unique_user_ids) + 1, 10), ])
 
         self.year_embedding = tf.keras.Sequential([
-            tf.keras.layers.Discretization(num_bins=15),
-            tf.keras.layers.Embedding(15, 10),
+            tf.keras.layers.Discretization(num_bins=YEAR_BINS),
+            tf.keras.layers.Embedding(YEAR_BINS, 10),
+        ])
+
+        self.num_rating_embedding = tf.keras.Sequential([
+            tf.keras.layers.Discretization(num_bins=YEAR_BINS),
+            tf.keras.layers.Embedding(YEAR_BINS, 10),
         ])
 
     def call(self, inputs):
         return tf.concat([
             self.user_embedding(inputs["user_idx"]),
             self.year_embedding(inputs["year"]),
+            self.num_rating_embedding(inputs["num_ratings"]),
         ], axis=1)
 
 
@@ -83,11 +94,15 @@ class BGGRetrievalModel(tfrs.Model):
 
     def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
         # We pick out the user features and pass them into the user model.
-        user_embeddings = self.user_model({'user_idx': features['user_idx'], 'year': features['year']})
+        user_embeddings = self.user_model({'user_idx': features['user_idx'],
+                                           'year': features['year'],
+                                           'num_ratings': features['num_ratings']})
 
         # And pick out the movie features and pass them into the movie model,
         # getting embeddings back.
-        positive_movie_embeddings = self.movie_model({'title': features['title'], 'year': features['year']})
+        positive_movie_embeddings = self.movie_model({'title': features['title'],
+                                                      'year': features['year'],
+                                                      'num_ratings': features['num_ratings']})
 
         # The task computes the loss and the metrics.
         return self.task(user_embeddings, positive_movie_embeddings)
@@ -103,7 +118,8 @@ def get_ratings_data():
     ratings_original = pd.read_csv('DataFiles/ratings_data_0.csv').append(pd.read_csv('DataFiles/ratings_data_1.csv'))
     ratings_original = ratings_original[['rating_int', 'user_idx', 'game_idx']]
     title_join = pd.read_csv('DataFiles/games.csv')
-    title_join = title_join[['game_idx', 'title', 'year']]
+    title_join = title_join[['game_idx', 'title', 'year', 'ratings']]
+    title_join.rename(columns={'ratings': 'num_ratings'}, inplace=True)
     title_join.drop_duplicates(inplace=True)
     ratings_original = ratings_original.merge(title_join, on='game_idx')
     ratings_original.rename(columns={'rating_int': 'rating'}, inplace=True)
@@ -112,6 +128,7 @@ def get_ratings_data():
     value_dict['user_idx'] = np.asarray(value_dict['user_idx'].astype('string'))
     value_dict['game_idx'] = np.asarray(value_dict['game_idx'].astype('string'))
     value_dict['year'] = np.asarray(value_dict['year'].astype('float32'))
+    value_dict['num_ratings'] = np.asarray(value_dict['num_ratings'].astype('float32'))
     ratings_tf = tf.data.Dataset.from_tensor_slices(value_dict)
     return ratings_tf.shuffle(4_000_000, seed=0, reshuffle_each_iteration=False)
 
@@ -124,8 +141,8 @@ def get_games_data():
         List of game titles
     """
     games_raw = pd.read_csv('DataFiles/games.csv')
-    games_raw.rename(columns={'rating': 'bgg_rating'}, inplace=True)
-    games_raw = games_raw[['title', 'year', 'bgg_rating', 'ratings']]
+    games_raw.rename(columns={'rating': 'bgg_rating', 'ratings': 'num_ratings'}, inplace=True)
+    games_raw = games_raw[['title', 'year', 'bgg_rating', 'num_ratings']]
 
     # Fix years
     games_raw.loc[games_raw['year'] <= 1980, 'year'] = 1980
@@ -142,22 +159,20 @@ def get_games_data():
     games_raw['bgg_rating'] = games_raw['bgg_rating'] / (max_ - min_)
 
     # Min/Max scale the ratings (num of ratings)
-    max_, min_ = games_raw['ratings'].max(), games_raw['ratings'].min()
-    games_raw['ratings'] = games_raw['ratings'] - min_
-    games_raw['ratings'] = games_raw['ratings'] / (max_ - min_)
+    max_, min_ = games_raw['num_ratings'].max(), games_raw['num_ratings'].min()
+    games_raw['num_ratings'] = games_raw['num_ratings'] - min_
+    games_raw['num_ratings'] = games_raw['num_ratings'] / (max_ - min_)
 
     games_raw['title'] = games_raw['title'].astype('string')
     games_raw['year'] = games_raw['year'].astype('float32')
     games_raw['bgg_rating'] = games_raw['bgg_rating'].astype('float32')
-    games_raw['ratings'] = games_raw['ratings'].astype('float32')
+    games_raw['num_ratings'] = games_raw['num_ratings'].astype('float32')
 
     value_dict = {name: values for name, values in games_raw.items()}
     value_dict['title'] = np.asarray(value_dict['title'].astype('string'))
     value_dict['year'] = np.asarray(value_dict['year'].astype('float32'))
     value_dict['bgg_rating'] = np.asarray(value_dict['bgg_rating'].astype('float32'))
-    value_dict['ratings'] = np.asarray(value_dict['ratings'].astype('float32'))
-
-    # final_data = tf.data.Dataset.zip((titles, years, ratings, num_ratings))
+    value_dict['num_ratings'] = np.asarray(value_dict['num_ratings'].astype('float32'))
 
     final_data = tf.data.Dataset.from_tensor_slices(value_dict)
 
@@ -171,6 +186,7 @@ if __name__ == '__main__':
 
     game_titles = game_info_original.map(lambda x: x['title'])
     game_years = game_info_original.map(lambda x: x['year'])
+    game_num_ratings = game_info_original.map(lambda x: x['num_ratings'])
 
     #  Obtain user ratings and organize for tensorflow
     ratings = get_ratings_data()
