@@ -86,26 +86,91 @@ class UserModel(tf.keras.Model):
 
 class BGGRetrievalModel(tfrs.Model):
 
-    def __init__(self, user_model_retrieval, movie_model_retrieval, retrieval_task):
+    def __init__(self, layer_sizes):
         super().__init__()
-        self.movie_model: tf.keras.Model = movie_model_retrieval
-        self.user_model: tf.keras.Model = user_model_retrieval
-        self.task: tf.keras.layers.Layer = retrieval_task
+        self.query_model = QueryModel(layer_sizes)
+        self.candidate_model = CandidateModel(layer_sizes)
+        self.task = tfrs.tasks.Retrieval(
+            metrics=tfrs.metrics.FactorizedTopK(
+                candidates=games.batch(64).map(self.candidate_model),),)
 
     def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
         # We pick out the user features and pass them into the user model.
-        user_embeddings = self.user_model({'user_idx': features['user_idx'],
+        user_embeddings = self.query_model({'user_idx': features['user_idx'],
                                            'year': features['year'],
                                            'num_ratings': features['num_ratings']})
 
         # And pick out the movie features and pass them into the movie model,
         # getting embeddings back.
-        positive_movie_embeddings = self.movie_model({'title': features['title'],
+        positive_movie_embeddings = self.candidate_model({'title': features['title'],
                                                       'year': features['year'],
                                                       'num_ratings': features['num_ratings']})
 
         # The task computes the loss and the metrics.
-        return self.task(user_embeddings, positive_movie_embeddings)
+        return self.task(user_embeddings, positive_movie_embeddings, compute_metrics=not training)
+
+
+class CandidateModel(tf.keras.Model):
+    """Model for encoding movies."""
+
+    def __init__(self, layer_sizes):
+        """Model for encoding movies.
+
+        Args:
+          layer_sizes:
+            A list of integers where the i-th entry represents the number of units
+            the i-th layer contains.
+        """
+        super().__init__()
+
+        self.embedding_model = GameModel()
+
+        # Then construct the layers.
+        self.dense_layers = tf.keras.Sequential()
+
+        # Use the ReLU activation for all but the last layer.
+        for layer_size in layer_sizes[:-1]:
+            self.dense_layers.add(tf.keras.layers.Dense(layer_size, activation="relu"))
+
+        # No activation for the last layer.
+        for layer_size in layer_sizes[-1:]:
+            self.dense_layers.add(tf.keras.layers.Dense(layer_size))
+
+    def call(self, inputs):
+        feature_embedding = self.embedding_model(inputs)
+        return self.dense_layers(feature_embedding)
+
+
+class QueryModel(tf.keras.Model):
+    """Model for encoding user queries."""
+
+    def __init__(self, layer_sizes):
+        """Model for encoding user queries.
+
+        Args:
+          layer_sizes:
+            A list of integers where the i-th entry represents the number of units
+            the i-th layer contains.
+        """
+        super().__init__()
+
+        # We first use the user model for generating embeddings.
+        self.embedding_model = UserModel()
+
+        # Then construct the layers.
+        self.dense_layers = tf.keras.Sequential()
+
+        # Use the ReLU activation for all but the last layer.
+        for layer_size in layer_sizes[:-1]:
+            self.dense_layers.add(tf.keras.layers.Dense(layer_size, activation="relu"))
+
+        # No activation for the last layer.
+        for layer_size in layer_sizes[-1:]:
+            self.dense_layers.add(tf.keras.layers.Dense(layer_size))
+
+    def call(self, inputs):
+        feature_embedding = self.embedding_model(inputs)
+        return self.dense_layers(feature_embedding)
 
 
 def get_ratings_data():
@@ -207,7 +272,7 @@ if __name__ == '__main__':
 
     task = tfrs.tasks.Retrieval(metrics=metrics)
 
-    retrieval_model = BGGRetrievalModel(bgg_user_model, bgg_game_model, task)
+    retrieval_model = BGGRetrievalModel([128, 64])
 
     # Fit Model
     retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
