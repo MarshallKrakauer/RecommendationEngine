@@ -21,7 +21,7 @@ EPOCHS = 1
 DIMENSIONS = 10
 YEAR_BINS = 20
 GAMES_BATCH = 20
-SAVE_MODEL = False
+SAVE_MODEL = True
 
 
 class GameModel(tfrs.Model):
@@ -92,19 +92,19 @@ class BGGRetrievalModel(tfrs.Model):
         self.candidate_model = CandidateModel(layer_sizes)
         self.task = tfrs.tasks.Retrieval(
             metrics=tfrs.metrics.FactorizedTopK(
-                candidates=games.batch(64).map(self.candidate_model),),)
+                candidates=games.batch(64).map(self.candidate_model), ), )
 
     def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
         # We pick out the user features and pass them into the user model.
         user_embeddings = self.query_model({'user_idx': features['user_idx'],
-                                           'year': features['year'],
-                                           'num_ratings': features['num_ratings']})
+                                            'year': features['year'],
+                                            'num_ratings': features['num_ratings']})
 
         # And pick out the movie features and pass them into the movie model,
         # getting embeddings back.
         positive_movie_embeddings = self.candidate_model({'title': features['title'],
-                                                      'year': features['year'],
-                                                      'num_ratings': features['num_ratings']})
+                                                          'year': features['year'],
+                                                          'num_ratings': features['num_ratings']})
 
         # The task computes the loss and the metrics.
         return self.task(user_embeddings, positive_movie_embeddings, compute_metrics=not training)
@@ -245,6 +245,9 @@ def get_games_data():
 
 
 if __name__ == '__main__':
+    tf.get_logger().setLevel(logging.ERROR)
+    tf.random.set_seed(0)
+
     # Obtain games info
     game_info_original = get_games_data()
     games = game_info_original
@@ -275,7 +278,7 @@ if __name__ == '__main__':
     retrieval_model = BGGRetrievalModel([128, 64])
 
     # Fit Model
-    retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
+    retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.5))
     cached_train = ratings_train.shuffle(1_000_000, seed=0).batch(5_000).cache()
     cached_test = ratings_test.batch(10_000).cache()
     retrieval_model.fit(cached_train, epochs=1)
@@ -284,11 +287,15 @@ if __name__ == '__main__':
     retrieval_model.evaluate(cached_test, return_dict=True)
 
     if SAVE_MODEL:
-        # Create a model that takes in raw query features, and
-        index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
-        # recommends movies out of the entire movies dataset.
-        index.index_from_dataset(tf.data.Dataset.zip((games_tf_data.batch(GAMES_BATCH),
-                                                      games_tf_data.batch(GAMES_BATCH).map(model.movie_model))))
+        brute_force = tfrs.layers.factorized_top_k.BruteForce(retrieval_model.query_model)
 
-        # Save the index.
-        tf.saved_model.save(index, PATH, options=tf.saved_model.SaveOptions())
+        brute_force.index_from_dataset(
+            tf.data.Dataset.zip((game_titles.batch(20), games.batch(20).map(retrieval_model.candidate_model))))
+
+        test = brute_force({"user_idx": np.array(["32"]), "year": np.array([0]), 'num_ratings': np.array([0])})
+
+        print(test)
+
+        tf.saved_model.save(brute_force, PATH, options=tf.saved_model.SaveOptions())
+
+        # loaded = tf.saved_model.load(PATH)
