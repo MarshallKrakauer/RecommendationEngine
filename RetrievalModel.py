@@ -3,8 +3,6 @@
 Based on the code from this page: https://www.tensorflow.org/recommenders/examples/basic_retrieval
 
 Some code will contain "movie" terminology to match Google's code. This will be changed later.
-
-Work in progress. Model does not currently run
 """
 
 import logging
