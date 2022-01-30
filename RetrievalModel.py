@@ -242,6 +242,33 @@ def get_games_data():
     return final_data
 
 
+def get_user_suggestions(user_idx, bf_model):
+    """
+
+
+    :param user_idx: str or numeric
+        index of user from which to make a top 10 recommendation
+    :param bf_model: tf Brute Force Model
+        Trained model from which to made suggestions
+    :return: pandas DataFrame
+        Dataframe with user's top recommendation, with most relevant game t the top
+    """
+    user_idx = str(user_idx)
+
+    try:
+        int(user_idx)
+    except ValueError:
+        return ValueError('string must shadow an integer value')
+
+    tf_ratings = bf_model({"user_idx": np.array([user_idx]), "year": np.array([1]), 'num_ratings': np.array([1])})
+    number_list = [float(elem) for elem in tf_ratings[0][0]]
+    title_list = [elem.numpy() for elem in tf_ratings[1][0]]
+    user_rating_df = pd.DataFrame(data={'games': title_list, 'rating': number_list})
+    user_rating_df['user_idx'] = user_idx
+    user_rating_df.sort_values('rating', ascending=False, inplace=True)
+    return user_rating_df
+
+
 if __name__ == '__main__':
     tf.get_logger().setLevel(logging.ERROR)
     tf.random.set_seed(0)
@@ -276,7 +303,7 @@ if __name__ == '__main__':
     retrieval_model = BGGRetrievalModel([128, 64])
 
     # Fit Model
-    retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.5))
+    retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
     cached_train = ratings_train.shuffle(1_000_000, seed=0).batch(5_000).cache()
     cached_test = ratings_test.batch(10_000).cache()
     retrieval_model.fit(cached_train, epochs=1)
@@ -296,4 +323,3 @@ if __name__ == '__main__':
 
         tf.saved_model.save(brute_force, PATH, options=tf.saved_model.SaveOptions())
 
-        # loaded = tf.saved_model.load(PATH)
