@@ -84,15 +84,36 @@ class UserModel(tf.keras.Model):
 
 class BGGRetrievalModel(tfrs.Model):
 
-    def __init__(self, layer_sizes):
+    def __init__(self, rating_weight, retrieval_weight):
         super().__init__()
-        self.query_model = QueryModel(layer_sizes)
-        self.candidate_model = CandidateModel(layer_sizes)
+        self.query_model = QueryModel([64, 32])
+        self.candidate_model = CandidateModel([64, 32])
         self.task = tfrs.tasks.Retrieval(
             metrics=tfrs.metrics.FactorizedTopK(
                 candidates=games.batch(64).map(self.candidate_model), ), )
 
-    def compute_loss(self, features: Dict[Text, tf.Tensor], training=False) -> tf.Tensor:
+        # The tasks.
+        self.rating_task: tf.keras.layers.Layer = tfrs.tasks.Ranking(
+            loss=tf.keras.losses.MeanSquaredError(),
+            metrics=[tf.keras.metrics.RootMeanSquaredError()],
+        )
+        self.retrieval_task: tf.keras.layers.Layer = tfrs.tasks.Retrieval(
+            metrics=tfrs.metrics.FactorizedTopK(
+                candidates=games.batch(128).map(self.candidate_model)
+            )
+        )
+
+        self.rating_model = tf.keras.Sequential([
+            tf.keras.layers.Dense(256, activation="relu"),
+            tf.keras.layers.Dense(128, activation="relu"),
+            tf.keras.layers.Dense(1),
+        ])
+
+        # The loss weights.
+        self.rating_weight = rating_weight
+        self.retrieval_weight = retrieval_weight
+
+    def call(self, features):
         # We pick out the user features and pass them into the user model.
         user_embeddings = self.query_model({'user_idx': features['user_idx'],
                                             'year': features['year'],
@@ -104,8 +125,31 @@ class BGGRetrievalModel(tfrs.Model):
                                                           'year': features['year'],
                                                           'num_ratings': features['num_ratings']})
 
-        # The task computes the loss and the metrics.
-        return self.task(user_embeddings, positive_movie_embeddings, compute_metrics=not training)
+        return (
+            user_embeddings,
+            positive_movie_embeddings,
+            # We apply the multi-layered rating model to a concatentation of
+            # user and movie embeddings.
+            self.rating_model(
+                tf.concat([user_embeddings, positive_movie_embeddings], axis=1)
+            ),
+        )
+
+    def compute_loss(self, features: Dict[Text, tf.Tensor], training=False):
+        ratings = features.pop("rating")
+
+        user_embeddings, movie_embeddings, rating_predictions = self(features)
+
+        # We compute the loss for each task.
+        rating_loss = self.rating_task(
+            labels=ratings,
+            predictions=rating_predictions,
+        )
+        retrieval_loss = self.retrieval_task(user_embeddings, movie_embeddings)
+
+        # And combine them using the loss weights.
+        return (self.rating_weight * rating_loss
+                + self.retrieval_weight * retrieval_loss)
 
 
 class CandidateModel(tf.keras.Model):
@@ -300,7 +344,7 @@ if __name__ == '__main__':
 
     task = tfrs.tasks.Retrieval(metrics=metrics)
 
-    retrieval_model = BGGRetrievalModel([128, 64])
+    retrieval_model = BGGRetrievalModel(rating_weight=0.0, retrieval_weight=1.0)
 
     # Fit Model
     retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
@@ -322,4 +366,3 @@ if __name__ == '__main__':
         print(test)
 
         tf.saved_model.save(brute_force, PATH, options=tf.saved_model.SaveOptions())
-
