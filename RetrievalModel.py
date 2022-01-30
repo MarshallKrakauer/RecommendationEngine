@@ -344,7 +344,7 @@ if __name__ == '__main__':
 
     task = tfrs.tasks.Retrieval(metrics=metrics)
 
-    retrieval_model = BGGRetrievalModel(rating_weight=0.0, retrieval_weight=1.0)
+    retrieval_model = BGGRetrievalModel(rating_weight=0, retrieval_weight=1.0)
 
     # Fit Model
     retrieval_model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
