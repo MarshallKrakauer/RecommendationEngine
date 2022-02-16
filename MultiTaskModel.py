@@ -288,7 +288,7 @@ def get_games_data():
 
 def get_user_suggestions(user_idx, bf_model):
     """
-
+    For a given user id, produces their predictions.
 
     :param user_idx: str or numeric
         index of user from which to make a top 10 recommendation
